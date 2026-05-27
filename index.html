@@ -850,19 +850,30 @@ function openHistory(){
     el.innerHTML=hist.map((h,i)=>{
       const total=(h.expenses||[]).reduce((s,e)=>s+e.amount,0);
       const d=new Date(h.savedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
-      return `<div class="hist-card" onclick="loadHistory(${i})">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      return `<div class="hist-card" style="position:relative">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start" onclick="loadHistory(${i})">
           <div>
             <div class="hist-name">${h.name||'Unnamed Outing'}</div>
             <div class="hist-meta">${[h.dest,h.members?.length+'pax',d].filter(Boolean).join(' · ')}</div>
             ${h.settled?'<span class="badge badge-green" style="margin-top:4px;display:inline-flex">✅ Settled</span>':''}
           </div>
-          <div class="hist-amt">${peso(total)}</div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="hist-amt">${peso(total)}</div>
+          </div>
         </div>
+        <button onclick="event.stopPropagation();deleteHistory(${i})" title="Delete" style="position:absolute;top:10px;right:10px;background:none;border:none;font-size:16px;cursor:pointer;color:var(--ink3);padding:4px 6px;border-radius:6px;line-height:1" onmouseover="this.style.color='var(--red)';this.style.background='var(--red-light)'" onmouseout="this.style.color='var(--ink3)';this.style.background='none'">🗑</button>
       </div>`;
     }).join('');
   }
   document.getElementById('history-modal').classList.add('open');
+}
+function deleteHistory(i){
+  if(!confirm('Delete this outing from history? This cannot be undone.')) return;
+  const hist=getHistory();
+  hist.splice(i,1);
+  localStorage.setItem(HKEY,JSON.stringify(hist));
+  openHistory(); // re-render the list
+  toast('Outing deleted.');
 }
 function loadHistory(i){
   const hist=getHistory();
@@ -907,12 +918,17 @@ function closeShare(){ document.getElementById('share-modal').classList.remove('
 function markSettled(){
   if(!S.expenses.length){ toast('No expenses to settle.'); return; }
   if(S.settled){ toast('Already settled!'); return; }
-  if(!confirm('Mark this outing as settled? It will be saved to Past Outings. You can still view the breakdown.')) return;
+  if(!confirm('Mark this outing as settled? It will be saved to Past Outings and a new outing will start.')) return;
   S.settled=true;
   saveToHistory();
-  save();
-  renderSettlement();
-  toast('Outing marked as settled! 🎉');
+  // Reset to fresh state
+  S={name:'',date:'',dest:'',treasurer:'',members:[],expenses:[],payments:[],settled:false};
+  localStorage.setItem(KEY,JSON.stringify(S));
+  set('outing-name',''); set('outing-date',''); set('outing-dest','');
+  setSplitMode('all');
+  renderMembers(); renderTreasurer(); renderPayerDropdown(); renderExpenses(); renderSettlement();
+  switchTab('setup', document.querySelectorAll('.tab')[0]);
+  toast('Settled & saved! Starting new outing 🎉');
 }
 
 // ═══════════════════════════════════════════════
