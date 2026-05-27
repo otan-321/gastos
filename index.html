@@ -261,6 +261,7 @@ select option{background:var(--surface);color:var(--ink)}
     <div style="font-size:12px;color:#52b788;margin-top:2px">Saved to Past Outings. You can still view and share the breakdown below.</div>
   </div>
   <div class="metrics" id="settle-metrics"></div>
+  <div id="spend-summary-card"></div>
   <div id="treasurer-banner-wrap"></div>
 
   <div class="card">
@@ -652,6 +653,96 @@ function renderSettlement(){
     <div class="metric"><div class="metric-label">Total Spent</div><div class="metric-value">${peso(total)}</div></div>
     <div class="metric"><div class="metric-label">Per Head</div><div class="metric-value green">${peso(perHead)}</div></div>
     <div class="metric"><div class="metric-label">Transfers</div><div class="metric-value">${txnCount}</div></div>`;
+
+  // ── spend summary ──
+  const allExp=S.expenses.filter(e=>!e.splitWith||e.splitWith.length===S.members.length||JSON.stringify([...e.splitWith].sort())===JSON.stringify([...S.members].sort()));
+  const customExp=S.expenses.filter(e=>e.splitWith&&e.splitWith.length!==S.members.length&&JSON.stringify([...e.splitWith].sort())!==JSON.stringify([...S.members].sort()));
+  const totalAll=allExp.reduce((s,e)=>s+e.amount,0);
+  const totalCustom=customExp.reduce((s,e)=>s+e.amount,0);
+
+  // Group custom expenses by their split group (sorted member list as key)
+  const customGroups={};
+  customExp.forEach(e=>{
+    const key=[...e.splitWith].sort().join('|');
+    if(!customGroups[key]) customGroups[key]={members:[...e.splitWith],expenses:[]};
+    customGroups[key].expenses.push(e);
+  });
+
+  let summaryHtml=`<div class="card" style="margin-bottom:12px">
+    <div class="section-label">Spend Summary</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="font-size:13px;font-weight:700;color:var(--ink)">Overall Total</div>
+      <div style="font-family:'Fraunces',serif;font-size:20px;font-weight:700;color:var(--accent)">${peso(total)}</div>
+    </div>`;
+
+  // All-members row
+  summaryHtml+=`<div style="padding:10px 0;${customExp.length?'border-bottom:1px solid var(--border)':''}">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${allExp.length?'8px':'0'}">
+      <div>
+        <div style="font-size:13px;font-weight:600">Everyone's Expenses</div>
+        <div style="font-size:11px;color:var(--ink3);margin-top:1px">${allExp.length} expense${allExp.length!==1?'s':''} · split among all ${S.members.length} members</div>
+      </div>
+      <div style="font-family:'DM Mono',monospace;font-size:14px;font-weight:600;color:var(--ink)">${peso(totalAll)}</div>
+    </div>`;
+  if(allExp.length){
+    summaryHtml+=`<div style="background:var(--bg);border-radius:8px;overflow:hidden">`;
+    allExp.forEach((e,idx)=>{
+      const perP=e.amount/S.members.length;
+      summaryHtml+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;${idx<allExp.length-1?'border-bottom:1px solid var(--border)':''}">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.name}</div>
+          <div style="font-size:11px;color:var(--ink3)">${e.payer} paid · ${peso(perP)}/person</div>
+        </div>
+        <div style="font-family:'DM Mono',monospace;font-size:12px;font-weight:500;flex-shrink:0;margin-left:8px">${peso(e.amount)}</div>
+      </div>`;
+    });
+    summaryHtml+=`</div>`;
+  }
+  summaryHtml+=`</div>`;
+
+  // Custom-split groups
+  if(customExp.length){
+    summaryHtml+=`<div style="padding:10px 0 0">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div>
+          <div style="font-size:13px;font-weight:600">Custom Split Expenses</div>
+          <div style="font-size:11px;color:var(--ink3);margin-top:1px">${customExp.length} expense${customExp.length!==1?'s':''} · not split equally among all</div>
+        </div>
+        <div style="font-family:'DM Mono',monospace;font-size:14px;font-weight:600;color:var(--amber)">${peso(totalCustom)}</div>
+      </div>`;
+    Object.values(customGroups).forEach(g=>{
+      const groupTotal=g.expenses.reduce((s,e)=>s+e.amount,0);
+      const perP=groupTotal/g.members.length;
+      summaryHtml+=`<div style="background:var(--amber-light);border:1px solid var(--amber);border-radius:8px;margin-bottom:8px;overflow:hidden">
+        <div style="padding:8px 10px;border-bottom:1px solid rgba(224,124,36,.2);display:flex;justify-content:space-between;align-items:center">
+          <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+            ${g.members.map(m=>`<span style="display:inline-flex;align-items:center;gap:4px;background:#fff;border-radius:20px;padding:2px 8px;font-size:11px;font-weight:600;color:var(--amber)"><span style="width:16px;height:16px;background:var(--amber-light);border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-family:'DM Mono',monospace">${initials(m)}</span>${m}</span>`).join('')}
+          </div>
+          <div style="font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:var(--amber);flex-shrink:0;margin-left:6px">${peso(groupTotal)}</div>
+        </div>
+        <div style="padding:4px 0">`;
+      g.expenses.forEach((e,idx)=>{
+        const sw=e.splitWith||S.members;
+        const ePerP=e.amount/sw.length;
+        summaryHtml+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 10px;${idx<g.expenses.length-1?'border-bottom:1px solid rgba(224,124,36,.15)':''}">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.name}</div>
+            <div style="font-size:11px;color:var(--ink3)">${e.payer} paid · ${peso(ePerP)}/person</div>
+          </div>
+          <div style="font-family:'DM Mono',monospace;font-size:12px;font-weight:500;flex-shrink:0;margin-left:8px">${peso(e.amount)}</div>
+        </div>`;
+      });
+      summaryHtml+=`</div>
+        <div style="padding:6px 10px;background:rgba(224,124,36,.08);font-size:11px;color:var(--amber);font-family:'DM Mono',monospace;text-align:right">
+          ${peso(perP)}/person × ${g.members.length} people
+        </div>
+      </div>`;
+    });
+    summaryHtml+=`</div>`;
+  }
+
+  summaryHtml+=`</div>`;
+  document.getElementById('spend-summary-card').innerHTML=summaryHtml;
 
   // ── treasurer banner ──
   const tbw=document.getElementById('treasurer-banner-wrap');
