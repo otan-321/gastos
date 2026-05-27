@@ -255,6 +255,11 @@ select option{background:var(--surface);color:var(--ink)}
 
 <!-- ══ SETTLEMENT ══ -->
 <div id="tab-settlement" class="page">
+  <div id="settled-banner" style="display:none;background:#d8f3e3;border:1.5px solid #52b788;border-radius:10px;padding:14px;margin-bottom:12px;text-align:center">
+    <div style="font-size:22px;margin-bottom:4px">✅</div>
+    <div style="font-weight:700;font-size:15px;color:#2d6a4f">This outing is settled!</div>
+    <div style="font-size:12px;color:#52b788;margin-top:2px">Saved to Past Outings. You can still view and share the breakdown below.</div>
+  </div>
   <div class="metrics" id="settle-metrics"></div>
   <div id="treasurer-banner-wrap"></div>
 
@@ -274,9 +279,11 @@ select option{background:var(--surface);color:var(--ink)}
     <div id="expense-breakdown"></div>
   </div>
 
-  <button class="btn btn-ghost btn-block" onclick="openShareModal()" style="margin-top:4px">
-    📸 Share Breakdown Image
-  </button>
+  <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
+    <button class="btn btn-ghost btn-block" onclick="openShareModal()">📸 Share Group Breakdown</button>
+    <button class="btn btn-ghost btn-block" onclick="openPersonShareModal()">👤 Share Per-Person Slip</button>
+    <button class="btn btn-block" id="settle-btn" style="background:var(--accent);color:#fff" onclick="markSettled()">✅ Mark as Settled</button>
+  </div>
 </div>
 
 <!-- ══ SHARE MODAL ══ -->
@@ -289,6 +296,21 @@ select option{background:var(--surface);color:var(--ink)}
     <div style="display:flex;gap:8px">
       <button class="btn btn-primary" style="flex:1" onclick="downloadReceipt()">⬇ Save Image</button>
       <button class="btn btn-ghost" style="flex:none;padding:10px 14px" onclick="closeShare()">✕</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ PERSON SHARE MODAL ══ -->
+<div class="modal-overlay" id="person-share-modal">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Per-Person Slip</div>
+    <div class="modal-sub">Select a person to generate their expense slip</div>
+    <div id="person-select-chips" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px"></div>
+    <canvas id="person-share-canvas" style="display:block;width:100%;border-radius:8px;border:1px solid var(--border);margin-bottom:12px"></canvas>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="downloadPersonReceipt()">⬇ Save Image</button>
+      <button class="btn btn-ghost" style="flex:none;padding:10px 14px" onclick="closePersonShare()">✕</button>
     </div>
   </div>
 </div>
@@ -314,7 +336,7 @@ select option{background:var(--surface);color:var(--ink)}
 const KEY  = 'gastos_v3';
 const HKEY = 'gastos_history_v3';
 
-let S = { name:'', date:'', dest:'', treasurer:'', members:[], expenses:[], payments:[] };
+let S = { name:'', date:'', dest:'', treasurer:'', members:[], expenses:[], payments:[], settled:false };
 let splitMode = 'all';
 
 const CAT = { food:'Food', transport:'Transport', accommodation:'Stay', drinks:'Drinks', activities:'Activities', others:'Others' };
@@ -570,9 +592,13 @@ function computeTreasurerFlow(bal){
   const payouts=[];       // treasurer pays back to overpayers
 
   S.members.forEach(m=>{
-    // How much did this member actually pay out of pocket?
+    // Use actual share per expense (respects custom splitWith)
     const paidOOP=S.expenses.filter(e=>e.payer===m).reduce((s,e)=>s+e.amount,0);
-    const diff=parseFloat((perHead-paidOOP).toFixed(2));
+    const shareOwed=S.expenses.reduce((s,e)=>{
+      const sw=(e.splitWith||S.members).filter(x=>S.members.includes(x));
+      return sw.includes(m)?s+e.amount/sw.length:s;
+    },0);
+    const diff=parseFloat((shareOwed-paidOOP).toFixed(2));
     if(diff>0.01){
       contributions.push({id:`contrib-${m}`,member:m,amount:diff});
     } else if(diff<-0.01){
@@ -594,12 +620,23 @@ function togglePaid(id){
 // ═══════════════════════════════════════════════
 function renderSettlement(){
   if(!S.members.length){
+    document.getElementById('settled-banner').style.display='none';
     document.getElementById('settle-metrics').innerHTML='';
     document.getElementById('settlement-list').innerHTML='<div class="empty" style="padding:16px 0">Add members in Setup first.</div>';
     document.getElementById('balance-list').innerHTML='';
     document.getElementById('expense-breakdown').innerHTML='';
     document.getElementById('treasurer-banner-wrap').innerHTML='';
     return;
+  }
+  // settled banner + button
+  document.getElementById('settled-banner').style.display=S.settled?'block':'none';
+  const sb=document.getElementById('settle-btn');
+  if(sb){
+    if(S.settled){
+      sb.textContent='✅ Settled'; sb.disabled=true; sb.style.opacity='0.5'; sb.style.cursor='default';
+    } else {
+      sb.textContent='✅ Mark as Settled'; sb.disabled=false; sb.style.opacity='1'; sb.style.cursor='pointer';
+    }
   }
 
   const bal=computeBalances();
@@ -818,6 +855,7 @@ function openHistory(){
           <div>
             <div class="hist-name">${h.name||'Unnamed Outing'}</div>
             <div class="hist-meta">${[h.dest,h.members?.length+'pax',d].filter(Boolean).join(' · ')}</div>
+            ${h.settled?'<span class="badge badge-green" style="margin-top:4px;display:inline-flex">✅ Settled</span>':''}
           </div>
           <div class="hist-amt">${peso(total)}</div>
         </div>
@@ -844,7 +882,7 @@ function closeHistory(){ document.getElementById('history-modal').classList.remo
 function confirmClear(){
   if(!confirm('Save current outing to history and start a new one?')) return;
   saveToHistory();
-  S={name:'',date:'',dest:'',treasurer:'',members:[],expenses:[],payments:[]};
+  S={name:'',date:'',dest:'',treasurer:'',members:[],expenses:[],payments:[],settled:false};
   localStorage.setItem(KEY,JSON.stringify(S));
   set('outing-name',''); set('outing-date',''); set('outing-dest','');
   setSplitMode('all');
@@ -862,6 +900,195 @@ function openShareModal(){
   document.getElementById('share-modal').classList.add('open');
 }
 function closeShare(){ document.getElementById('share-modal').classList.remove('open'); }
+
+// ═══════════════════════════════════════════════
+// MARK SETTLED
+// ═══════════════════════════════════════════════
+function markSettled(){
+  if(!S.expenses.length){ toast('No expenses to settle.'); return; }
+  if(S.settled){ toast('Already settled!'); return; }
+  if(!confirm('Mark this outing as settled? It will be saved to Past Outings. You can still view the breakdown.')) return;
+  S.settled=true;
+  saveToHistory();
+  save();
+  renderSettlement();
+  toast('Outing marked as settled! 🎉');
+}
+
+// ═══════════════════════════════════════════════
+// PER-PERSON SHARE
+// ═══════════════════════════════════════════════
+let currentPersonShare=null;
+
+function openPersonShareModal(){
+  if(!S.expenses.length){ toast('No expenses to share yet.'); return; }
+  if(!S.members.length){ toast('No members yet.'); return; }
+  // Build person selector chips
+  const wrap=document.getElementById('person-select-chips');
+  wrap.innerHTML=S.members.map(m=>`
+    <button onclick="selectPersonShare('${esc(m)}')" id="pchip-${esc(m)}" 
+      style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1.5px solid var(--border);border-radius:20px;background:var(--bg);font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;color:var(--ink)">
+      <span style="width:24px;height:24px;background:var(--accent-light);color:var(--accent);border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;font-family:'DM Mono',monospace">${initials(m)}</span>
+      ${m}${S.treasurer===m?' 👑':''}
+    </button>`).join('');
+  document.getElementById('person-share-canvas').style.display='none';
+  currentPersonShare=null;
+  document.getElementById('person-share-modal').classList.add('open');
+  // Auto-select first person
+  if(S.members.length) selectPersonShare(S.members[0]);
+}
+function closePersonShare(){ document.getElementById('person-share-modal').classList.remove('open'); }
+
+function selectPersonShare(member){
+  currentPersonShare=member;
+  // Highlight selected chip
+  S.members.forEach(m=>{
+    const chip=document.getElementById('pchip-'+m);
+    if(!chip) return;
+    if(m===member){
+      chip.style.borderColor='var(--accent)';
+      chip.style.background='var(--accent-light)';
+      chip.style.color='var(--accent)';
+    } else {
+      chip.style.borderColor='var(--border)';
+      chip.style.background='var(--bg)';
+      chip.style.color='var(--ink)';
+    }
+  });
+  drawPersonReceipt(member);
+  document.getElementById('person-share-canvas').style.display='block';
+}
+
+function drawPersonReceipt(member){
+  const canvas=document.getElementById('person-share-canvas');
+  const DPR=Math.min(window.devicePixelRatio||1,2);
+  const W=400, PAD=28;
+
+  // Compute this person's data
+  const myExpenses=[];
+  S.expenses.forEach(e=>{
+    const sw=(e.splitWith||S.members).filter(x=>S.members.includes(x));
+    if(sw.includes(member)){
+      myExpenses.push({...e, myShare: e.amount/sw.length, splitCount: sw.length});
+    }
+  });
+  const paidOOP=S.expenses.filter(e=>e.payer===member).reduce((s,e)=>s+e.amount,0);
+  const totalShare=myExpenses.reduce((s,e)=>s+e.myShare,0);
+  const net=parseFloat((paidOOP-totalShare).toFixed(2));
+
+  // Compute what they specifically owe or get back
+  const bal=computeBalances();
+  const hasTreasurer=S.treasurer&&S.members.includes(S.treasurer);
+  const flow=hasTreasurer?computeTreasurerFlow(bal):null;
+  const txns=computeTransactions(bal);
+
+  // Height
+  let h=52+32+(S.dest||S.date?18:0)+16;
+  h+=14+myExpenses.length*36+16; // my expenses
+  h+=16+50+16; // summary
+  h+=16+50+20; // action
+  h+=30; // footer
+
+  canvas.width=W*DPR; canvas.height=h*DPR;
+  canvas.style.width='100%'; canvas.style.height='auto';
+  const ctx=canvas.getContext('2d');
+  ctx.scale(DPR,DPR);
+
+  ctx.fillStyle='#fafaf8'; ctx.fillRect(0,0,W,h);
+  // header
+  ctx.fillStyle='#1a1a1a'; ctx.fillRect(0,0,W,52);
+  ctx.fillStyle='#fff'; ctx.font='bold 18px Georgia,serif'; ctx.textAlign='center';
+  ctx.fillText('Gastos',W/2,33);
+  let y=52;
+
+  // person avatar circle
+  ctx.fillStyle='#d8f3e3';
+  ctx.beginPath(); ctx.arc(W/2,y+28,22,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#2d6a4f'; ctx.font='bold 14px monospace'; ctx.textAlign='center';
+  ctx.fillText(initials(member),W/2,y+34); y+=60;
+
+  ctx.fillStyle='#1a1a1a'; ctx.font='bold 15px Georgia,serif'; ctx.textAlign='center';
+  ctx.fillText(member+(S.treasurer===member?' 👑':''),W/2,y); y+=16;
+  if(S.name){
+    ctx.fillStyle='#888'; ctx.font='11px monospace';
+    ctx.fillText(S.name+([S.dest,S.date].filter(Boolean).length?' · '+[S.dest,S.date].filter(Boolean).join(' · '):''),W/2,y+2); y+=16;
+  }
+  y+=8;
+
+  const dashed=yy=>{ ctx.setLineDash([4,4]); ctx.strokeStyle='#ddd'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(PAD,yy); ctx.lineTo(W-PAD,yy); ctx.stroke(); ctx.setLineDash([]); };
+  const solid=yy=>{ ctx.strokeStyle='#bbb'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(PAD,yy); ctx.lineTo(W-PAD,yy); ctx.stroke(); };
+  const lbl=(txt,yy)=>{ ctx.font='9px monospace'; ctx.fillStyle='#aaa'; ctx.textAlign='left'; ctx.fillText(txt,PAD,yy); };
+
+  dashed(y+4); y+=14;
+  lbl('MY EXPENSE SHARES',y); y+=14;
+  if(!myExpenses.length){
+    ctx.font='11px Arial,sans-serif'; ctx.fillStyle='#aaa'; ctx.textAlign='center';
+    ctx.fillText('Not included in any expense',W/2,y+6); y+=20;
+  } else {
+    myExpenses.forEach(e=>{
+      ctx.font='12px Arial,sans-serif'; ctx.fillStyle='#1a1a1a'; ctx.textAlign='left';
+      const nm=e.name.length>26?e.name.slice(0,24)+'…':e.name;
+      ctx.fillText(nm,PAD,y);
+      ctx.font='500 12px monospace'; ctx.fillStyle='#1a1a1a'; ctx.textAlign='right';
+      ctx.fillText(peso(e.myShare),W-PAD,y); y+=14;
+      ctx.font='10px Arial,sans-serif'; ctx.fillStyle='#999'; ctx.textAlign='left';
+      const payerNote=e.payer===member?'You paid':'Paid by '+e.payer;
+      ctx.fillText(`${payerNote} · ÷${e.splitCount} people`,PAD,y); y+=18;
+    });
+  }
+
+  y+=4; dashed(y); y+=14;
+  lbl('SUMMARY',y); y+=16;
+  ctx.font='12px Arial,sans-serif'; ctx.fillStyle='#555'; ctx.textAlign='left';
+  ctx.fillText('Your total share',PAD,y);
+  ctx.font='500 12px monospace'; ctx.fillStyle='#1a1a1a'; ctx.textAlign='right';
+  ctx.fillText(peso(totalShare),W-PAD,y); y+=18;
+  ctx.font='12px Arial,sans-serif'; ctx.fillStyle='#555'; ctx.textAlign='left';
+  ctx.fillText('You paid out of pocket',PAD,y);
+  ctx.font='500 12px monospace'; ctx.fillStyle='#2d6a4f'; ctx.textAlign='right';
+  ctx.fillText(peso(paidOOP),W-PAD,y); y+=10;
+  solid(y); y+=12;
+  ctx.font='bold 14px monospace';
+  ctx.fillStyle=net>0.01?'#2d6a4f':net<-0.01?'#c1121f':'#888';
+  ctx.textAlign='left'; ctx.fillText(net>0.01?'You get back':net<-0.01?'You owe':'Settled ✓',PAD,y);
+  ctx.textAlign='right';
+  ctx.fillText(net>0.01?peso(net):net<-0.01?peso(-net):'—',W-PAD,y); y+=22;
+
+  // What to do
+  solid(y); y+=14;
+  lbl('WHAT TO DO',y); y+=14;
+  let actions=[];
+  if(hasTreasurer&&flow){
+    const contrib=flow.contributions.find(c=>c.member===member);
+    const payout=flow.payouts.find(p=>p.member===member);
+    if(contrib) actions.push(`Pay ${peso(contrib.amount)} to 👑${S.treasurer}`);
+    if(payout) actions.push(`Receive ${peso(payout.amount)} from 👑${S.treasurer}`);
+    if(!contrib&&!payout) actions.push('Nothing to do — you\'re all settled!');
+  } else {
+    const myTxns=txns.filter(t=>t.from===member||t.to===member);
+    if(!myTxns.length) actions.push('Nothing to do — you\'re all settled!');
+    myTxns.forEach(t=>{
+      if(t.from===member) actions.push(`Pay ${peso(t.amount)} to ${t.to}`);
+      else actions.push(`Receive ${peso(t.amount)} from ${t.from}`);
+    });
+  }
+  actions.forEach(a=>{
+    ctx.font='11px Arial,sans-serif'; ctx.fillStyle='#1a1a1a'; ctx.textAlign='left';
+    ctx.fillText('• '+a,PAD,y); y+=18;
+  });
+
+  y+=8; dashed(y); y+=14;
+  ctx.font='10px Arial,sans-serif'; ctx.fillStyle='#bbb'; ctx.textAlign='center';
+  ctx.fillText('Generated by Gastos · '+new Date().toLocaleString('en-PH',{dateStyle:'medium',timeStyle:'short'}),W/2,y);
+}
+
+function downloadPersonReceipt(){
+  if(!currentPersonShare){ toast('Select a person first.'); return; }
+  const canvas=document.getElementById('person-share-canvas');
+  const a=document.createElement('a');
+  a.download=`gastos-${(currentPersonShare||'person').toLowerCase().replace(/\s+/g,'-')}.png`;
+  a.href=canvas.toDataURL('image/png',1.0); a.click();
+}
 
 function drawReceipt(){
   const canvas=document.getElementById('share-canvas');
