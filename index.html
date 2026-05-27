@@ -451,6 +451,21 @@ select option{background:var(--surface);color:var(--text)}
     <div id="export-out" class="export-area">I-click ang "Generate Summary" para lumabas ang breakdown...</div>
     <div style="display:flex;gap:8px;margin-top:10px">
       <button class="btn btn-outline" style="flex:1" onclick="copyExport()"><i class="ti ti-copy"></i> Copy</button>
+      <button class="btn btn-primary" style="flex:1" onclick="shareAsImage()"><i class="ti ti-camera"></i> Share as Image</button>
+    </div>
+    <!-- Image preview modal -->
+    <div id="share-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:999;align-items:center;justify-content:center;padding:16px">
+      <div style="background:#fff;border-radius:16px;padding:16px;max-width:420px;width:100%;max-height:90vh;overflow-y:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <span style="font-weight:700;font-size:16px;color:#0f172a">📸 Share Summary</span>
+          <button onclick="document.getElementById('share-modal').style.display='none'" style="background:none;border:none;font-size:22px;cursor:pointer;color:#64748b">×</button>
+        </div>
+        <canvas id="share-canvas" style="width:100%;border-radius:12px;display:block"></canvas>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-primary btn-block" onclick="downloadShareImage()"><i class="ti ti-download"></i> Save Image</button>
+        </div>
+        <p style="text-align:center;font-size:12px;color:#94a3b8;margin-top:8px">Save the image then send to your group chat 🎉</p>
+      </div>
     </div>
   </div>
 </div>
@@ -1066,6 +1081,194 @@ function copyExport(){
   const txt=document.getElementById('export-out').textContent;
   if(txt.startsWith('I-click')) { generateExport(); }
   navigator.clipboard.writeText(document.getElementById('export-out').textContent).then(()=>toast('Copied! I-paste na sa group chat 🎉')).catch(()=>toast('Copy failed — manually select the text.'));
+}
+
+// ─── SHARE AS IMAGE ───────────────────────────────────────
+function shareAsImage(){
+  generateExport();
+  const bal = computeBalances();
+  const total = S.expenses.reduce((s,e)=>s+e.amount,0);
+  const going = goingMembers();
+  const perHead = going.length ? total/going.length : 0;
+  const hasTreasurer = S.treasurer && going.includes(S.treasurer);
+  const flow = hasTreasurer ? computeTreasurerFlow(bal) : null;
+  const txns = computeSettlements(bal);
+  const tripName = S.planning.name || 'Barkada Outing';
+  const tripDate = S.planning.date ? new Date(S.planning.date).toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'}) : '';
+
+  // Build rows
+  const rows = [];
+  if(flow){
+    flow.contributions.forEach(c=>rows.push({type:'owe', from:c.member, to:'👑 '+S.treasurer, amount:c.amount}));
+    flow.payouts.forEach(p=>rows.push({type:'get', from:'👑 '+S.treasurer, to:p.member, amount:p.amount}));
+  } else {
+    txns.forEach(t=>rows.push({type:'owe', from:t.from, to:t.to, amount:t.amount}));
+  }
+
+  // Expense breakdown by category
+  const cats = {};
+  S.expenses.forEach(e=>{ cats[e.cat]=(cats[e.cat]||0)+e.amount; });
+  const catEntries = Object.entries(cats).sort((a,b)=>b[1]-a[1]);
+  const CAT_EMOJI = {food:'🍽️',transport:'🚗',accommodation:'🏨',drinks:'🍻',activities:'🎯',others:'📦'};
+
+  // Canvas sizing
+  const W = 640;
+  const ROW_H = 48;
+  const CAT_H = catEntries.length ? (catEntries.length * 36 + 48) : 0;
+  const SETTLE_H = rows.length ? (rows.length * ROW_H + 52) : 60;
+  const MEMBERS_H = going.length ? Math.ceil(going.length/3)*32 + 44 : 0;
+  const H = 180 + MEMBERS_H + CAT_H + SETTLE_H + 60;
+
+  const canvas = document.getElementById('share-canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // Background
+  const grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'#f0fdf4');
+  grad.addColorStop(1,'#ffffff');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0,0,W,H);
+
+  // Header bar
+  ctx.fillStyle = '#16a34a';
+  roundRect(ctx, 0, 0, W, 80, {tl:0, tr:0, br:0, bl:0});
+  ctx.fill();
+
+  // Logo
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 28px sans-serif';
+  ctx.fillText('💸 Gastos', 24, 50);
+
+  // Trip name
+  ctx.font = '600 14px sans-serif';
+  ctx.fillStyle = '#bbf7d0';
+  ctx.textAlign = 'right';
+  ctx.fillText(tripName + (tripDate ? ' · '+tripDate : ''), W-24, 38);
+  ctx.fillText(`${going.length} miyembro`, W-24, 60);
+  ctx.textAlign = 'left';
+
+  let y = 100;
+
+  // Totals row
+  ctx.fillStyle = '#ffffff';
+  roundRect(ctx, 16, y, W-32, 64, 12); ctx.fill();
+  ctx.strokeStyle = '#bbf7d0'; ctx.lineWidth=1.5; ctx.stroke();
+
+  ctx.fillStyle = '#0f172a'; ctx.font='bold 13px sans-serif';
+  ctx.fillText('TOTAL GASTOS', 32, y+22);
+  ctx.fillStyle='#16a34a'; ctx.font='bold 22px sans-serif';
+  ctx.fillText(pesoImg(total), 32, y+50);
+
+  ctx.fillStyle='#475569'; ctx.font='bold 13px sans-serif';
+  ctx.textAlign='right';
+  ctx.fillText('PER HEAD (KKB)', W-32, y+22);
+  ctx.fillStyle='#16a34a'; ctx.font='bold 22px sans-serif';
+  ctx.fillText(pesoImg(perHead), W-32, y+50);
+  ctx.textAlign='left';
+  y += 80;
+
+  // Members section
+  if(going.length){
+    ctx.fillStyle='#475569'; ctx.font='700 11px sans-serif';
+    ctx.fillText('👥  BARKADA', 16, y+16);
+    y+=28;
+    const cols=3, cellW=(W-32)/cols;
+    going.forEach((m,i)=>{
+      const col=i%cols, row=Math.floor(i/cols);
+      const mx=16+col*cellW, my=y+row*32;
+      ctx.fillStyle='#f0fdf4'; roundRect(ctx,mx,my,cellW-8,26,8); ctx.fill();
+      ctx.strokeStyle='#bbf7d0'; ctx.lineWidth=1; ctx.stroke();
+      ctx.fillStyle='#14532d'; ctx.font='600 13px sans-serif';
+      ctx.fillText(m+(S.treasurer===m?' 👑':''), mx+10, my+18);
+    });
+    y += Math.ceil(going.length/3)*32+12;
+  }
+
+  // Category breakdown
+  if(catEntries.length){
+    ctx.fillStyle='#475569'; ctx.font='700 11px sans-serif';
+    ctx.fillText('📊  BREAKDOWN BY CATEGORY', 16, y+16);
+    y+=28;
+    catEntries.forEach(([cat,amt])=>{
+      const pct = total>0 ? amt/total : 0;
+      ctx.fillStyle='#f8fafb'; roundRect(ctx,16,y,W-32,30,8); ctx.fill();
+      // bar
+      ctx.fillStyle='#dcfce7'; roundRect(ctx,16,y,(W-32)*pct,30,{tl:8,tr:pct>0.98?8:0,br:pct>0.98?8:0,bl:8}); ctx.fill();
+      ctx.fillStyle='#0f172a'; ctx.font='600 13px sans-serif';
+      ctx.fillText((CAT_EMOJI[cat]||'•')+' '+CAT_LABELS[cat], 28, y+20);
+      ctx.textAlign='right'; ctx.fillStyle='#166534';
+      ctx.fillText(pesoImg(amt)+' ('+Math.round(pct*100)+'%)', W-28, y+20);
+      ctx.textAlign='left';
+      y+=36;
+    });
+    y+=8;
+  }
+
+  // Settlement section
+  ctx.fillStyle='#475569'; ctx.font='700 11px sans-serif';
+  ctx.fillText('⚖️  SINO MAG-BABAYAD', 16, y+16);
+  y+=28;
+
+  if(!rows.length){
+    ctx.fillStyle='#f0fdf4'; roundRect(ctx,16,y,W-32,44,10); ctx.fill();
+    ctx.strokeStyle='#86efac'; ctx.lineWidth=1.5; ctx.stroke();
+    ctx.fillStyle='#16a34a'; ctx.font='600 15px sans-serif'; ctx.textAlign='center';
+    ctx.fillText('✅  Lahat pantay! Walang utangan.', W/2, y+28);
+    ctx.textAlign='left'; y+=52;
+  } else {
+    rows.forEach(r=>{
+      ctx.fillStyle='#ffffff'; roundRect(ctx,16,y,W-32,ROW_H-4,10); ctx.fill();
+      ctx.strokeStyle = r.type==='owe'?'#fecaca':'#bbf7d0'; ctx.lineWidth=1.5; ctx.stroke();
+      ctx.fillStyle='#0f172a'; ctx.font='600 14px sans-serif';
+      ctx.fillText(r.from, 28, y+20);
+      ctx.fillStyle='#94a3b8'; ctx.font='400 14px sans-serif';
+      ctx.fillText('→', 28+ctx.measureText(r.from).width+8, y+20);
+      ctx.fillStyle='#0f172a'; ctx.font='600 14px sans-serif';
+      const arrowX=28+ctx.measureText(r.from).width+28;
+      ctx.fillText(r.to, arrowX, y+20);
+      ctx.textAlign='right';
+      ctx.fillStyle=r.type==='owe'?'#ef4444':'#16a34a';
+      ctx.font='700 15px sans-serif';
+      ctx.fillText(pesoImg(r.amount), W-28, y+20);
+      ctx.textAlign='left';
+      // subtext
+      ctx.fillStyle='#94a3b8'; ctx.font='400 11px sans-serif';
+      ctx.fillText(r.type==='owe'?'mag-bayad':'ibabalik', 28, y+36);
+      y+=ROW_H;
+    });
+  }
+
+  // Footer
+  y+=10;
+  ctx.fillStyle='#94a3b8'; ctx.font='400 11px sans-serif'; ctx.textAlign='center';
+  ctx.fillText('Generated by Gastos 💸 · gastos app', W/2, y+16);
+  ctx.textAlign='left';
+
+  // Show modal
+  document.getElementById('share-modal').style.display='flex';
+}
+
+function pesoImg(n){ return '₱'+parseFloat(n||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+function roundRect(ctx, x, y, w, h, r){
+  if(typeof r==='number') r={tl:r,tr:r,br:r,bl:r};
+  ctx.beginPath();
+  ctx.moveTo(x+r.tl, y);
+  ctx.lineTo(x+w-r.tr, y); ctx.quadraticCurveTo(x+w,y,x+w,y+r.tr);
+  ctx.lineTo(x+w,y+h-r.br); ctx.quadraticCurveTo(x+w,y+h,x+w-r.br,y+h);
+  ctx.lineTo(x+r.bl,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r.bl);
+  ctx.lineTo(x,y+r.tl); ctx.quadraticCurveTo(x,y,x+r.tl,y);
+  ctx.closePath();
+}
+
+function downloadShareImage(){
+  const canvas=document.getElementById('share-canvas');
+  const a=document.createElement('a');
+  a.download='gastos-summary.png';
+  a.href=canvas.toDataURL('image/png');
+  a.click();
 }
 
 // ─── CLEAR ALL ────────────────────────────────────────────
