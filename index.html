@@ -1208,23 +1208,45 @@ function drawReceipt(){
   const flow=hasTreasurer?computeTreasurerFlow(bal):null;
   const txns=computeTransactions(bal);
 
+  // Split summary data
+  const allExp=S.expenses.filter(e=>!e.splitWith||e.splitWith.length===S.members.length||JSON.stringify([...e.splitWith].sort())===JSON.stringify([...S.members].sort()));
+  const customExp=S.expenses.filter(e=>e.splitWith&&e.splitWith.length!==S.members.length&&JSON.stringify([...e.splitWith].sort())!==JSON.stringify([...S.members].sort()));
+  const totalAll=allExp.reduce((s,e)=>s+e.amount,0);
+  const totalCustom=customExp.reduce((s,e)=>s+e.amount,0);
+  const customGroups={};
+  customExp.forEach(e=>{
+    const key=[...e.splitWith].sort().join('|');
+    if(!customGroups[key]) customGroups[key]={members:[...e.splitWith],expenses:[]};
+    customGroups[key].expenses.push(e);
+  });
+  const customGroupList=Object.values(customGroups);
+
   // Compute height dynamically
-  let h=52+30+(S.dest||S.date?18:0)+18; // header + outing name + info + gap
-  h+=16+S.expenses.length*36+16;         // expenses section
-  h+=16+60+16;                            // totals
+  let h=52+30+(S.dest||S.date?18:0)+18;
+  // SPEND SUMMARY section
+  h+=16+14; // section label
+  h+=26;    // overall total row
+  h+=14+allExp.length*30+14; // all-members block
+  if(customExp.length){
+    h+=14; // custom header row
+    customGroupList.forEach(g=>{
+      h+=28+g.expenses.length*28+18; // group header + rows + footer
+    });
+  }
+  h+=16; // gap before settlement
+  // Settlement
   const settleItems=flow?(flow.contributions.length+flow.payouts.length):txns.length;
-  h+=16+(settleItems?settleItems*26+8:22)+16; // settlement
-  h+=16+S.members.length*20+16;           // per-person
-  h+=36;                                   // footer + padding
+  h+=16+(settleItems?settleItems*22+8:22)+16;
+  // Per-person
+  h+=16+S.members.length*20+16;
+  h+=36; // footer
 
   canvas.width=W*DPR; canvas.height=h*DPR;
   canvas.style.width='100%'; canvas.style.height='auto';
   const ctx=canvas.getContext('2d');
   ctx.scale(DPR,DPR);
 
-  // bg
   ctx.fillStyle='#fafaf8'; ctx.fillRect(0,0,W,h);
-
   let y=0;
 
   // header
@@ -1245,36 +1267,68 @@ function drawReceipt(){
   const dashed=yy=>{ ctx.setLineDash([4,4]); ctx.strokeStyle='#ddd'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(PAD,yy); ctx.lineTo(W-PAD,yy); ctx.stroke(); ctx.setLineDash([]); };
   const solid=yy=>{ ctx.strokeStyle='#bbb'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(PAD,yy); ctx.lineTo(W-PAD,yy); ctx.stroke(); };
   const label=(txt,yy)=>{ ctx.font='9px monospace'; ctx.fillStyle='#aaa'; ctx.textAlign='left'; ctx.fillText(txt,PAD,yy); };
-  const row=(l,r,opts={})=>{ 
-    ctx.font=`${opts.bold?'bold ':''} ${opts.size||12}px ${opts.mono?'monospace':'Arial,sans-serif'}`;
-    ctx.fillStyle=opts.color||'#1a1a1a';
-    ctx.textAlign='left'; ctx.fillText(l,PAD,y);
-    ctx.textAlign='right'; ctx.fillText(r,W-PAD,y);
-    y+=opts.gap||18;
-  };
 
+  // ── SPEND SUMMARY ──
   dashed(y+6); y+=16;
-  label('EXPENSES',y); y+=14;
-  S.expenses.forEach(e=>{
-    const sw=(e.splitWith||S.members);
-    ctx.font='12px Arial,sans-serif'; ctx.fillStyle='#1a1a1a'; ctx.textAlign='left';
-    ctx.fillText(e.name.length>28?e.name.slice(0,26)+'…':e.name,PAD,y);
-    ctx.font='500 12px monospace'; ctx.textAlign='right';
+  label('SPEND SUMMARY',y); y+=14;
+
+  // Overall total
+  ctx.fillStyle='#d8f3e3'; roundRect(ctx,PAD,y,W-PAD*2,22,5); ctx.fill();
+  ctx.font='bold 13px Arial,sans-serif'; ctx.fillStyle='#1a1a1a'; ctx.textAlign='left';
+  ctx.fillText('Overall Total',PAD+8,y+15);
+  ctx.font='bold 13px monospace'; ctx.fillStyle='#2d6a4f'; ctx.textAlign='right';
+  ctx.fillText(peso(total),W-PAD-8,y+15); y+=30;
+
+  // Everyone's expenses
+  ctx.font='bold 11px Arial,sans-serif'; ctx.fillStyle='#1a1a1a'; ctx.textAlign='left';
+  ctx.fillText('Everyone\'s Expenses',PAD,y);
+  ctx.font='11px monospace'; ctx.fillStyle='#555'; ctx.textAlign='right';
+  ctx.fillText(peso(totalAll),W-PAD,y); y+=14;
+  allExp.forEach(e=>{
+    ctx.font='11px Arial,sans-serif'; ctx.fillStyle='#333'; ctx.textAlign='left';
+    ctx.fillText('  '+(e.name.length>26?e.name.slice(0,24)+'…':e.name),PAD,y);
+    ctx.font='11px monospace'; ctx.fillStyle='#333'; ctx.textAlign='right';
     ctx.fillText(peso(e.amount),W-PAD,y); y+=14;
-    ctx.font='10px Arial,sans-serif'; ctx.fillStyle='#999'; ctx.textAlign='left';
-    ctx.fillText(`${e.payer} paid · ÷${sw.length} = ${peso(e.amount/sw.length)}/person`,PAD,y); y+=18;
+    ctx.font='10px Arial,sans-serif'; ctx.fillStyle='#aaa'; ctx.textAlign='left';
+    ctx.fillText(`    ${e.payer} paid · ${peso(e.amount/S.members.length)}/person`,PAD,y); y+=16;
   });
+  if(!allExp.length){ ctx.font='10px Arial,sans-serif'; ctx.fillStyle='#bbb'; ctx.textAlign='left'; ctx.fillText('  None',PAD,y); y+=16; }
 
-  y+=4; dashed(y); y+=14;
-  label('TOTALS',y); y+=14;
-  row('Total Spent',peso(total),{bold:true,size:13});
-  row(`${S.members.length} members`,`${peso(perHead)} each`,{color:'#666',size:12,gap:14});
-  solid(y); y+=12;
-  ctx.font='bold 15px monospace'; ctx.fillStyle='#2d6a4f';
-  ctx.textAlign='left'; ctx.fillText('PER HEAD',PAD,y);
-  ctx.textAlign='right'; ctx.fillText(peso(perHead),W-PAD,y); y+=22;
-  solid(y); y+=14;
+  // Custom split expenses
+  if(customExp.length){
+    y+=4; solid(y); y+=10;
+    ctx.font='bold 11px Arial,sans-serif'; ctx.fillStyle='#1a1a1a'; ctx.textAlign='left';
+    ctx.fillText('Custom Split Expenses',PAD,y);
+    ctx.font='11px monospace'; ctx.fillStyle='#e07c24'; ctx.textAlign='right';
+    ctx.fillText(peso(totalCustom),W-PAD,y); y+=14;
 
+    customGroupList.forEach(g=>{
+      const gTotal=g.expenses.reduce((s,e)=>s+e.amount,0);
+      // group header bg
+      ctx.fillStyle='#fef3e2'; roundRect(ctx,PAD,y,W-PAD*2,22,5); ctx.fill();
+      ctx.font='bold 10px Arial,sans-serif'; ctx.fillStyle='#e07c24'; ctx.textAlign='left';
+      const names=g.members.join(', ');
+      ctx.fillText(names.length>40?names.slice(0,38)+'…':names, PAD+8,y+15);
+      ctx.font='bold 10px monospace'; ctx.textAlign='right';
+      ctx.fillText(peso(gTotal),W-PAD-8,y+15); y+=26;
+
+      g.expenses.forEach(e=>{
+        const sw=e.splitWith||S.members;
+        ctx.font='11px Arial,sans-serif'; ctx.fillStyle='#333'; ctx.textAlign='left';
+        ctx.fillText('  '+(e.name.length>26?e.name.slice(0,24)+'…':e.name),PAD,y);
+        ctx.font='11px monospace'; ctx.fillStyle='#333'; ctx.textAlign='right';
+        ctx.fillText(peso(e.amount),W-PAD,y); y+=14;
+        ctx.font='10px Arial,sans-serif'; ctx.fillStyle='#aaa'; ctx.textAlign='left';
+        ctx.fillText(`    ${e.payer} paid · ${peso(e.amount/sw.length)}/person`,PAD,y); y+=14;
+      });
+      ctx.font='10px monospace'; ctx.fillStyle='#e07c24'; ctx.textAlign='right';
+      ctx.fillText(`${peso(gTotal/g.members.length)}/person × ${g.members.length} people`,W-PAD,y); y+=18;
+    });
+  }
+
+  y+=8; dashed(y); y+=14;
+
+  // ── SETTLEMENT ──
   label(hasTreasurer?`SETTLEMENT (via 👑 ${S.treasurer})`:'SETTLEMENT',y); y+=14;
   if(hasTreasurer&&flow){
     if(!flow.contributions.length&&!flow.payouts.length){
@@ -1309,6 +1363,8 @@ function drawReceipt(){
   }
 
   y+=4; dashed(y); y+=14;
+
+  // ── PER PERSON SUMMARY ──
   label('PER PERSON SUMMARY',y); y+=14;
   S.members.forEach(m=>{
     const paidOOP=S.expenses.filter(e=>e.payer===m).reduce((s,e)=>s+e.amount,0);
@@ -1328,6 +1384,16 @@ function drawReceipt(){
   y+=6; dashed(y); y+=16;
   ctx.font='10px Arial,sans-serif'; ctx.fillStyle='#bbb'; ctx.textAlign='center';
   ctx.fillText('Generated by Gastos · '+new Date().toLocaleString('en-PH',{dateStyle:'medium',timeStyle:'short'}),W/2,y);
+}
+
+function roundRect(ctx,x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.closePath();
 }
 
 function downloadReceipt(){
