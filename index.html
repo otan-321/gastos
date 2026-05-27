@@ -1123,20 +1123,26 @@ function pF(n){ return '₱'+parseFloat(n||0).toLocaleString('en-PH',{minimumFra
 
 // Update export dropdown with history entries
 function refreshExportSelect(){
-  const sel = document.getElementById('export-outing-select');
-  if(!sel) return;
-  const history = S.history || [];
-  // keep only current option then add history
-  sel.innerHTML = '<option value="current">📍 Current outing</option>' +
-    history.map((h,i)=>`<option value="history:${i}">📦 ${h.name||'Unnamed'} — ${h.date||''}</option>`).join('');
+  try{
+    const sel = document.getElementById('export-outing-select');
+    if(!sel) return;
+    const history = (S && S.history) ? S.history : [];
+    sel.innerHTML = '<option value="current">📍 Current outing</option>' +
+      history.map((h,i)=>`<option value="history:${i}">📦 ${h.name||'Unnamed'} — ${h.date||''}</option>`).join('');
+  }catch(e){}
 }
 
-// Hook into switchTab to refresh select when export tab opens
-const _origSwitchTab = window.switchTab;
-window.switchTab = function(id, el){
-  _origSwitchTab(id, el);
-  if(id==='export') refreshExportSelect();
-};
+// Safely patch switchTab after all scripts load
+document.addEventListener('DOMContentLoaded', function(){}, false);
+// We patch via a safe wrapper instead
+(function patchSwitchTab(){
+  const orig = window.switchTab;
+  if(typeof orig !== 'function'){ setTimeout(patchSwitchTab, 50); return; }
+  window.switchTab = function(id, el){
+    orig(id, el);
+    if(id==='export'){ try{ refreshExportSelect(); }catch(e){} }
+  };
+})();
 
 // Override generateExport to support history outings
 const _origGenerateExport = window.generateExport;
@@ -1498,7 +1504,7 @@ function downloadShareImage(){
 }
 
 // refresh select on page load
-setTimeout(refreshExportSelect, 100);
+setTimeout(function(){ try{ refreshExportSelect(); }catch(e){} }, 300);
 </script>
 </body>
 </html>
