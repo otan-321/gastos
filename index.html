@@ -5,7 +5,14 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
 <meta name="theme-color" content="#1a1a1a"/>
 <title>Gastos</title>
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,700;1,9..144,300&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,700;1,9..144,300&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'"/>
+<noscript><link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,700;1,9..144,300&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet"/></noscript>
+<link rel="manifest" href="gastos.webmanifest"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black"/>
+<meta name="apple-mobile-web-app-title" content="Gastos"/>
 <style>
 :root{
   --bg:#f5f3ef;--ink:#1a1a1a;--ink2:#666;--ink3:#aaa;
@@ -130,12 +137,36 @@ button{font-family:'DM Sans',sans-serif;cursor:pointer}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--ink);color:#fff;padding:10px 20px;border-radius:20px;font-size:13px;font-weight:600;z-index:999;transition:transform .25s;pointer-events:none;white-space:nowrap}
 .toast.show{transform:translateX(-50%) translateY(0)}
 select option{background:var(--surface);color:var(--ink)}
+/* Font fallback for offline */
+body{font-family:'DM Sans','Helvetica Neue',Arial,sans-serif}
+.logo,.modal-title,.metric-value,.hist-name,.hist-amt{font-family:'Fraunces',Georgia,serif}
+.section-label,.metric-label,.item-amt,.badge,.cat-pill,.breakdown-table,.bal-val,.settle-amount,.hist-meta{font-family:'DM Mono','Courier New',monospace}
+/* Offline banner */
+.offline-bar{display:none;background:#e07c24;color:#fff;text-align:center;font-size:12px;font-weight:600;padding:6px;letter-spacing:.02em}
+.offline-bar.show{display:block}
+/* Notes field */
+.expense-note{font-size:11px;color:var(--ink3);margin-top:3px;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Category chart */
+.cat-chart-wrap{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}
+.cat-bar-item{display:flex;flex-direction:column;gap:3px}
+.cat-bar-label{font-family:'DM Mono',monospace;font-size:10px;color:var(--ink3);display:flex;justify-content:space-between}
+.cat-bar-track{height:6px;background:var(--bg);border-radius:3px;overflow:hidden}
+.cat-bar-fill{height:100%;border-radius:3px;transition:width .4s}
+/* Floating action buttons */
+.fab-row{position:fixed;bottom:16px;right:16px;display:flex;flex-direction:column;gap:8px;z-index:50}
+.fab{width:44px;height:44px;border-radius:50%;border:none;font-size:18px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18);display:flex;align-items:center;justify-content:center;transition:transform .15s}
+.fab:active{transform:scale(.92)}
+.fab-export{background:var(--surface);color:var(--ink)}
+/* Import/export section */
+.data-actions{display:flex;gap:6px;margin-top:8px}
+
 .info-box{background:var(--accent-light);border:1px solid var(--accent-mid);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--accent);margin-bottom:10px;line-height:1.5}
 .info-box.amber{background:var(--amber-light);border-color:var(--amber);color:#7a4500}
 </style>
 </head>
 <body>
 
+<div class="offline-bar" id="offline-bar">📵 You're offline — Gastos still works!</div>
 <div class="header">
   <div class="header-inner">
     <div class="logo">Gast<em>os</em></div>
@@ -180,6 +211,17 @@ select option{background:var(--surface);color:var(--ink)}
     </div>
     <div class="chips" id="chips-wrap"></div>
     <div id="member-count" style="font-size:12px;color:var(--ink3);margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <div class="section-label">Data</div>
+    <div style="font-size:12px;color:var(--ink2);margin-bottom:8px">Back up or restore your outings. Useful when switching devices or clearing storage.</div>
+    <div class="data-actions">
+      <button class="btn btn-ghost btn-sm" style="flex:1" onclick="exportData()">⬇ Export Backup</button>
+      <label class="btn btn-ghost btn-sm" style="flex:1;text-align:center;cursor:pointer">
+        ⬆ Import Backup<input type="file" accept=".json" style="display:none" onchange="importData(this)"/>
+      </label>
+    </div>
   </div>
 
   <div class="card" id="treasurer-setup-card" style="display:none">
@@ -228,6 +270,10 @@ select option{background:var(--surface);color:var(--ink)}
     <div class="field">
       <label>Paid by</label>
       <select id="e-payer"><option value="">Select payer...</option></select>
+    </div>
+    <div class="field">
+      <label>Notes <span style="font-weight:400;color:var(--ink3)">(optional)</span></label>
+      <input id="e-notes" type="text" placeholder="e.g. receipt #12, Anna's birthday portion"/>
     </div>
     <div class="field">
       <label>Split among</label>
@@ -280,10 +326,59 @@ select option{background:var(--surface);color:var(--ink)}
     <div id="expense-breakdown"></div>
   </div>
 
+  <div class="card">
+    <div class="section-label">Spending by Category</div>
+    <div id="cat-chart"></div>
+  </div>
+
   <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
     <button class="btn btn-ghost btn-block" onclick="openShareModal()">📸 Share Group Breakdown</button>
     <button class="btn btn-ghost btn-block" onclick="openPersonShareModal()">👤 Share Per-Person Slip</button>
     <button class="btn btn-block" id="settle-btn" style="background:var(--accent);color:#fff" onclick="markSettled()">✅ Mark as Settled</button>
+  </div>
+</div>
+
+
+<!-- ══ EDIT EXPENSE MODAL ══ -->
+<div class="modal-overlay" id="edit-modal">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Edit Expense</div>
+    <div class="modal-sub">Update the expense details below</div>
+    <input type="hidden" id="edit-id"/>
+    <div class="field">
+      <label>Description</label>
+      <input id="edit-name" type="text" placeholder="e.g. Lunch, Boat hire"/>
+    </div>
+    <div class="row">
+      <div>
+        <label>Amount (₱)</label>
+        <input id="edit-amount" type="number" placeholder="0.00" min="0" step="0.01"/>
+      </div>
+      <div>
+        <label>Category</label>
+        <select id="edit-cat">
+          <option value="food">🍽 Food</option>
+          <option value="transport">🚗 Transport</option>
+          <option value="accommodation">🏠 Stay</option>
+          <option value="drinks">🍻 Drinks</option>
+          <option value="activities">🎉 Activities</option>
+          <option value="others">📦 Others</option>
+        </select>
+      </div>
+    </div>
+    <div class="field">
+      <label>Paid by</label>
+      <select id="edit-payer"></select>
+    </div>
+    <div class="field">
+      <label>Notes <span style="font-weight:400;color:var(--ink3)">(optional)</span></label>
+      <input id="edit-notes" type="text" placeholder="optional note"/>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveEdit()">Save Changes</button>
+      <button class="btn btn-ghost" style="flex:none;padding:10px 14px" onclick="closeEdit()">Cancel</button>
+    </div>
   </div>
 </div>
 
@@ -488,21 +583,20 @@ function addExpense(){
     sw=[...document.querySelectorAll('#split-members input:checked')].map(i=>i.value);
     if(!sw.length){ toast('Select at least 1 person for the split.'); return; }
   }
+  const notes=document.getElementById('e-notes').value.trim();
   S.expenses.push({
-    id:Date.now(),name,amount:amt,cat,payer,
+    id:Date.now(),name,amount:amt,cat,payer,notes,
     splitWith:sw,
     date:new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'})
   });
   document.getElementById('e-name').value='';
   document.getElementById('e-amount').value='';
+  document.getElementById('e-notes').value='';
   setSplitMode('all');
   save(); renderExpenses();
   toast('Expense added!');
 }
-function removeExpense(id){
-  S.expenses=S.expenses.filter(e=>e.id!==id);
-  save(); renderExpenses();
-}
+// removeExpense now handled by undo version above
 function renderExpenses(){
   const list=document.getElementById('expense-list');
   const card=document.getElementById('expense-summary-card');
@@ -531,10 +625,11 @@ function renderExpenses(){
             <span style="font-size:11px;color:var(--ink3)">
               ${isCustom?'Custom split: '+sw.join(', '):'Split among everyone: '+sw.join(', ')}
             </span>
-          </div>
+          </div>${e.notes?`<div class='expense-note'>📝 ${e.notes}</div>`:''}
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0">
           <div class="item-amt">${peso(e.amount)}</div>
+          <button class="btn-icon-sm" onclick="editExpense(${e.id})" title="Edit" style="color:var(--ink3)">✏️</button>
           <button class="btn-icon-sm" onclick="removeExpense(${e.id})">🗑</button>
         </div>
       </div>
@@ -860,6 +955,8 @@ function renderSettlement(){
 
   // ── expense breakdown per person ──
   renderBreakdown(bal);
+  // ── category chart ──
+  renderCatChart();
 }
 
 // ═══════════════════════════════════════════════
@@ -1402,6 +1499,151 @@ function downloadReceipt(){
   a.download=`gastos-${(S.name||'receipt').toLowerCase().replace(/\s+/g,'-')}.png`;
   a.href=canvas.toDataURL('image/png',1.0); a.click();
 }
+
+
+// ═══════════════════════════════════════════════
+// EDIT EXPENSE
+// ═══════════════════════════════════════════════
+function editExpense(id){
+  const e=S.expenses.find(x=>x.id===id);
+  if(!e) return;
+  document.getElementById('edit-id').value=id;
+  document.getElementById('edit-name').value=e.name;
+  document.getElementById('edit-amount').value=e.amount;
+  document.getElementById('edit-cat').value=e.cat||'food';
+  document.getElementById('edit-notes').value=e.notes||'';
+  const sel=document.getElementById('edit-payer');
+  sel.innerHTML=S.members.map(m=>`<option value="${m}" ${m===e.payer?'selected':''}>${m}</option>`).join('');
+  document.getElementById('edit-modal').classList.add('open');
+}
+function closeEdit(){ document.getElementById('edit-modal').classList.remove('open'); }
+function saveEdit(){
+  const id=parseInt(document.getElementById('edit-id').value);
+  const name=document.getElementById('edit-name').value.trim();
+  const amt=parseFloat(document.getElementById('edit-amount').value)||0;
+  const cat=document.getElementById('edit-cat').value;
+  const payer=document.getElementById('edit-payer').value;
+  const notes=document.getElementById('edit-notes').value.trim();
+  if(!name){ toast('Add a description.'); return; }
+  if(!amt){ toast('Enter an amount.'); return; }
+  const idx=S.expenses.findIndex(x=>x.id===id);
+  if(idx===-1){ toast('Expense not found.'); return; }
+  S.expenses[idx]={...S.expenses[idx],name,amount:amt,cat,payer,notes};
+  save(); renderExpenses(); closeEdit(); toast('Expense updated!');
+}
+
+// ═══════════════════════════════════════════════
+// UNDO DELETE
+// ═══════════════════════════════════════════════
+let _undoExp=null, _undoTimer=null;
+function removeExpense(id){
+  const exp=S.expenses.find(e=>e.id===id);
+  if(!exp) return;
+  _undoExp={...exp, _idx: S.expenses.findIndex(e=>e.id===id)};
+  S.expenses=S.expenses.filter(e=>e.id!==id);
+  save(); renderExpenses();
+  showUndoToast();
+}
+function showUndoToast(){
+  clearTimeout(_undoTimer);
+  const t=document.getElementById('toast');
+  t.innerHTML='Deleted. <span onclick="undoDelete()" style="text-decoration:underline;cursor:pointer;font-weight:700">Undo</span>';
+  t.classList.add('show');
+  _undoTimer=setTimeout(()=>{ t.classList.remove('show'); _undoExp=null; },4000);
+}
+function undoDelete(){
+  if(!_undoExp) return;
+  clearTimeout(_undoTimer);
+  const {_idx,...exp}=_undoExp;
+  S.expenses.splice(_idx,0,exp);
+  _undoExp=null;
+  save(); renderExpenses();
+  toast('Expense restored!');
+}
+
+// ═══════════════════════════════════════════════
+// CATEGORY CHART
+// ═══════════════════════════════════════════════
+const CAT_COLORS={food:'#166534',transport:'#1e40af',accommodation:'#5b21b6',drinks:'#92400e',activities:'#9d174d',others:'#475569'};
+const CAT_BG={food:'#dcfce7',transport:'#dbeafe',accommodation:'#ede9fe',drinks:'#fef3c7',activities:'#fce7f3',others:'#f1f5f9'};
+function renderCatChart(){
+  const el=document.getElementById('cat-chart');
+  if(!el||!S.expenses.length){ if(el) el.innerHTML='<div style="color:var(--ink3);font-size:13px;text-align:center;padding:12px">No expenses yet.</div>'; return; }
+  const totals={};
+  S.expenses.forEach(e=>{ totals[e.cat||'others']=(totals[e.cat||'others']||0)+e.amount; });
+  const grand=Object.values(totals).reduce((a,b)=>a+b,0);
+  const sorted=Object.entries(totals).sort((a,b)=>b[1]-a[1]);
+  el.innerHTML=`<div class="cat-chart-wrap">${sorted.map(([cat,amt])=>{
+    const pct=grand?Math.round(amt/grand*100):0;
+    const color=CAT_COLORS[cat]||'#475569';
+    const bg=CAT_BG[cat]||'#f1f5f9';
+    return `<div class="cat-bar-item">
+      <div class="cat-bar-label">
+        <span style="color:${color};font-weight:600">${CAT[cat]||cat}</span>
+        <span>${pct}%</span>
+      </div>
+      <div class="cat-bar-track"><div class="cat-bar-fill" style="width:${pct}%;background:${color}"></div></div>
+      <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--ink2)">${peso(amt)}</div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+// ═══════════════════════════════════════════════
+// EXPORT / IMPORT
+// ═══════════════════════════════════════════════
+function exportData(){
+  const hist=getHistory();
+  const payload={current:S,history:hist,exportedAt:new Date().toISOString(),version:'gastos_v3'};
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=`gastos-backup-${new Date().toLocaleDateString('en-PH').replace(/\//g,'-')}.json`;
+  a.click(); URL.revokeObjectURL(url);
+  toast('Backup exported!');
+}
+function importData(input){
+  const file=input.files[0];
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=function(ev){
+    try{
+      const payload=JSON.parse(ev.target.result);
+      if(!payload.version||!payload.current) throw new Error('Invalid backup file');
+      if(!confirm('This will replace your current data with the backup. Continue?')) return;
+      S=payload.current;
+      localStorage.setItem('gastos_v3',JSON.stringify(S));
+      if(payload.history) localStorage.setItem('gastos_history_v3',JSON.stringify(payload.history));
+      set('outing-name',S.name); set('outing-date',S.date); set('outing-dest',S.dest);
+      renderMembers(); renderTreasurer(); renderPayerDropdown(); renderExpenses(); renderSettlement();
+      toast('Backup imported!');
+    } catch(e){ toast('Invalid backup file.'); }
+  };
+  reader.readAsText(file);
+  input.value='';
+}
+
+// ═══════════════════════════════════════════════
+// OFFLINE DETECTION
+// ═══════════════════════════════════════════════
+function updateOnlineStatus(){
+  const bar=document.getElementById('offline-bar');
+  if(bar) bar.classList.toggle('show',!navigator.onLine);
+}
+window.addEventListener('online',updateOnlineStatus);
+window.addEventListener('offline',updateOnlineStatus);
+updateOnlineStatus();
+
+// ═══════════════════════════════════════════════
+// SERVICE WORKER REGISTRATION
+// ═══════════════════════════════════════════════
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('./sw.js').then(reg=>{
+      console.log('Gastos SW registered',reg.scope);
+    }).catch(err=>console.log('SW reg failed',err));
+  });
+}
+
 
 // ═══════════════════════════════════════════════
 // INIT
